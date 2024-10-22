@@ -1,26 +1,23 @@
 import User from "../models/user.model.js";
-import sendEmail from '../utils/mailService.js';
+import sendEmail from "../utils/mailService.js";
 
-// generate access and refresh token 
+// generate access and refresh token
 
-const generateAccessAndRefereshTokens = async(userId) =>{
-    try {
-        const user = await User.findById(userId)
-        const accessToken = user.generateAccessToken()
-        const refreshToken = user.generateRefreshToken()
+const generateAccessAndRefereshTokens = async (userId) => {
+  try {
+    const user = await User.findById(userId);
+    const accessToken = user.generateAccessToken();
+    const refreshToken = user.generateRefreshToken();
 
-        user.refreshToken = refreshToken
-        await user.save({ validateBeforeSave: false })
+    user.refreshToken = refreshToken;
+    await user.save({ validateBeforeSave: false });
 
-        return {accessToken, refreshToken}
-
-
-    } catch (error) {
-        console.error("Error generating tokens:", error.message);
-        throw new Error("Internal server error. Please try again later.");
-        
-    }
-}
+    return { accessToken, refreshToken };
+  } catch (error) {
+    console.error("Error generating tokens:", error.message);
+    throw new Error("Internal server error. Please try again later.");
+  }
+};
 
 const registerUser = async (req, res) => {
   try {
@@ -49,8 +46,6 @@ const registerUser = async (req, res) => {
   }
 };
 
-
-
 const loginUser = async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -61,14 +56,18 @@ const loginUser = async (req, res) => {
   if (!user || !isPasswordValid) {
     return res.status(401).json({ error: "Invalid email or password" });
   }
-  const {accessToken, refreshToken} = await generateAccessAndRefereshTokens(user._id)
+  const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(
+    user._id
+  );
 
-    const loggedInUser = await User.findById(user._id).select("-password -refreshToken")
+  const loggedInUser = await User.findById(user._id).select(
+    "-password -refreshToken"
+  );
 
-    const options = {
-        httpOnly: true,
-        secure: true
-    }
+  const options = {
+    httpOnly: true,
+    secure: true,
+  };
   return res
     .status(201)
     .cookie("accessToken", accessToken, options)
@@ -80,7 +79,6 @@ const loginUser = async (req, res) => {
       refreshToken,
     });
 };
-
 
 // Function to handle forgot password (generating OTP and sending to email)
 const forgotPassword = async (req, res) => {
@@ -107,50 +105,147 @@ const forgotPassword = async (req, res) => {
 
     // Send OTP via email using sendEmail utility
     try {
-      await sendEmail(email, 'Password Reset OTP', `Your OTP code is ${otp} (expires in 1 minute).`);
-      return res.status(200).json({ message: "OTP has been sent to your email." });
+      await sendEmail(
+        email,
+        "Password Reset OTP",
+        `Your OTP code is ${otp} (expires in 1 minute).`
+      );
+      return res
+        .status(200)
+        .json({ message: "OTP has been sent to your email." });
     } catch (error) {
-      return res.status(500).json({ error: "Failed to send OTP. Please try again." });
+      return res
+        .status(500)
+        .json({ error: "Failed to send OTP. Please try again." });
     }
-
   } catch (error) {
     console.error("Error in forgot password:", error.message);
-    return res.status(500).json({ error: "Server error. Please try again later." });
+    return res
+      .status(500)
+      .json({ error: "Server error. Please try again later." });
   }
 };
 const resetPassword = async (req, res) => {
-    const { email, otp, newPassword, confirmPassword } = req.body;
-  
-    // Check if all required fields are present
-    if (!email || !otp || !newPassword || !confirmPassword) {
-      return res.status(400).json({ error: "All fields are required." });
+  const { email, otp, newPassword, confirmPassword } = req.body;
+
+  // Check if all required fields are present
+  if (!email || !otp || !newPassword || !confirmPassword) {
+    return res.status(400).json({ error: "All fields are required." });
+  }
+
+  // Check if new password and confirm password match
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({ error: "Passwords do not match." });
+  }
+
+  try {
+    // Find the user by email and valid OTP
+    const user = await User.findOne({
+      email,
+      otp,
+      otpExpire: { $gt: Date.now() },
+    });
+    if (!user) {
+      return res.status(400).json({ error: "Invalid or expired OTP." });
     }
-  
-    // Check if new password and confirm password match
-    if (newPassword !== confirmPassword) {
-      return res.status(400).json({ error: "Passwords do not match." });
+
+    // Use the model method to update the password and clear OTP
+    const updatePassword = await user.updatePassword(newPassword);
+    console.log(updatePassword)
+
+    return res.status(200).json({
+      message: "Password reset successfully.",
+    });
+  } catch (error) {
+    console.error("Error resetting password:", error.message);
+    return res
+      .status(500)
+      .json({ error: "Server error. Please try again later." });
+  }
+};
+
+const logoutUser = async (req, res) => {
+  await User.findByIdAndUpdate(
+    req.user._id,
+    {
+      $unset: {
+        refreshToken: 1, // this removes the field from document
+      },
+    },
+    {
+      new: true,
     }
-  
-    try {
-      // Find the user by email and valid OTP
-      const user = await User.findOne({ email, otp, otpExpire: { $gt: Date.now() } });
-      if (!user) {
-        return res.status(400).json({ error: "Invalid or expired OTP." });
-      }
-  
-      // Use the model method to update the password and clear OTP
-      await user.updatePassword(newPassword);
-  
-      return res.status(200).json({
-        message: "Password reset successfully.",
-      });
-  
-    } catch (error) {
-      console.error("Error resetting password:", error.message);
-      return res.status(500).json({ error: "Server error. Please try again later." });
-    }
+  );
+
+  const options = {
+    httpOnly: true,
+    secure: true,
   };
 
+  return res
+    .status(200)
+    .clearCookie("accessToken", options)
+    .clearCookie("refreshToken", options)
+    .json({
+      message: "User logged out successfully",
+    });
+};
 
+const refreshAccessToken = async (req, res) => {
+  const incomingRefreshToken =
+    req.cookies.refreshToken || req.body.refreshToken;
 
-export { registerUser, generateAccessAndRefereshTokens,loginUser,forgotPassword,resetPassword};
+  if (!incomingRefreshToken) {
+    return res.status(401).json({ error: "No refresh token provided" });
+  }
+
+  try {
+    const decodedToken = jwt.verify(
+      incomingRefreshToken,
+      process.env.REFRESH_TOKEN_SECRET
+    );
+
+    const user = await User.findById(decodedToken?._id);
+
+    if (!user) {
+      return res.status(403).json({ error: "User not found" });
+    }
+
+    if (incomingRefreshToken !== user?.refreshToken) {
+      return res.status(401).json({ error: "Refresh token does not match" });
+    }
+
+    const options = {
+      httpOnly: true,
+      secure: true,
+    };
+
+    const { accessToken, newRefreshToken } =
+      await generateAccessAndRefereshTokens(user._id);
+
+    return res
+      .status(200)
+      .cookie("accessToken", accessToken, options)
+      .cookie("refreshToken", newRefreshToken, options)
+      .json({
+        message: "Access token refreshed",
+        accessToken,
+        refreshToken: newRefreshToken,
+      });
+  } catch (error) {
+    console.error("Error refreshing access token:", error.message);
+    return res.status(500).json({
+      error: "Internal server error. Please try again later.",
+    });
+  }
+};
+
+export {
+  registerUser,
+  generateAccessAndRefereshTokens,
+  loginUser,
+  forgotPassword,
+  resetPassword,
+  logoutUser,
+  refreshAccessToken,
+};
