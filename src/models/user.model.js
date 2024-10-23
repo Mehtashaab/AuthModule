@@ -40,10 +40,12 @@ userSchema.methods.isPasswordCorrect = async function (password) {
 
 // Method to update password and clear OTP
 userSchema.methods.updatePassword = async function (newPassword) {
-  this.password = await bcrypt.hash(newPassword, 10);
+  this.password = newPassword;
   this.otp = null;
   this.otpExpire = null;
   await this.save();
+
+  return this;
 };
 
 // method for creating the accesstoken
